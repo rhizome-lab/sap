@@ -6,11 +6,11 @@ members = ["crates/*"]
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/rhizome-lab/sap"
+repository = "https://github.com/rhizome-lab/dew"
 
 [workspace.dependencies]
-rhizome-sap-core = { path = "crates/sap-core" }
-rhizome-sap-scalar = { path = "crates/sap-scalar" }
-rhizome-sap-linalg = { path = "crates/sap-linalg" }
-rhizome-sap-complex = { path = "crates/sap-complex" }
-rhizome-sap-quaternion = { path = "crates/sap-quaternion" }
+rhizome-dew-core = { path = "crates/dew-core" }
+rhizome-dew-scalar = { path = "crates/dew-scalar" }
+rhizome-dew-linalg = { path = "crates/dew-linalg" }
+rhizome-dew-complex = { path = "crates/dew-complex" }
+rhizome-dew-quaternion = { path = "crates/dew-quaternion" }

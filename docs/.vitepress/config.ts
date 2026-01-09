@@ -8,10 +8,10 @@ export default withMermaid(
         include: ['mermaid'],
       },
     },
-    title: 'Sap',
+    title: 'Dew',
     description: 'Minimal expression language with multiple backends',
 
-    base: '/sap/',
+    base: '/dew/',
 
     themeConfig: {
       nav: [
@@ -31,8 +31,8 @@ export default withMermaid(
           {
             text: 'Crates',
             items: [
-              { text: 'sap-scalar', link: '/scalar' },
-              { text: 'sap-linalg', link: '/linalg' },
+              { text: 'dew-scalar', link: '/scalar' },
+              { text: 'dew-linalg', link: '/linalg' },
             ]
           },
           {
@@ -47,7 +47,7 @@ export default withMermaid(
       },
 
       socialLinks: [
-        { icon: 'github', link: 'https://github.com/rhizome-lab/sap' }
+        { icon: 'github', link: 'https://github.com/rhizome-lab/dew' }
       ],
 
       search: {
@@ -55,7 +55,7 @@ export default withMermaid(
       },
 
       editLink: {
-        pattern: 'https://github.com/rhizome-lab/sap/edit/master/docs/:path',
+        pattern: 'https://github.com/rhizome-lab/dew/edit/master/docs/:path',
         text: 'Edit this page on GitHub'
       },
     },

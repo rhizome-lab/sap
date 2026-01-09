@@ -1,20 +1,20 @@
-# Sap
+# Dew
 
-Expression language for procedural generation.
+Minimal expression language for procedural generation.
 
 Part of the [Rhizome](https://rhizome-lab.github.io) ecosystem.
 
 ## Overview
 
-Sap is a domain-specific expression language designed for procedural content generation. It provides a composable way to define generation rules that can be compiled to multiple backends.
+Dew is a domain-specific expression language designed for procedural content generation. Small, ephemeral, perfectly formed—like a droplet condensed from logic. It provides a composable way to define generation rules that can be compiled to multiple backends.
 
 ## Crates
 
 | Crate | Description |
 |-------|-------------|
-| `rhizome-sap-core` | Core types and AST |
-| `rhizome-sap-scalar` | Standard scalar math functions (sin, cos, etc.) |
-| `rhizome-sap-linalg` | Linear algebra types and operations (Vec2, Mat3, etc.) |
+| `rhizome-dew-core` | Core types and AST |
+| `rhizome-dew-scalar` | Standard scalar math functions (sin, cos, etc.) |
+| `rhizome-dew-linalg` | Linear algebra types and operations (Vec2, Mat3, etc.) |
 
 Each domain crate (scalar, linalg) includes self-contained backends:
 - `wgsl` feature: WGSL shader code generation
@@ -24,12 +24,12 @@ Each domain crate (scalar, linalg) includes self-contained backends:
 ## Architecture
 
 ```
-sap-core           # Syntax only: AST, parsing
+dew-core           # Syntax only: AST, parsing
     |
-    +-- sap-scalar     # Scalar domain: f32/f64 math functions
+    +-- dew-scalar     # Scalar domain: f32/f64 math functions
     |                  # Backends: wgsl, lua, cranelift
     |
-    +-- sap-linalg     # Linalg domain: Vec2, Vec3, Mat2, Mat3, etc.
+    +-- dew-linalg     # Linalg domain: Vec2, Vec3, Mat2, Mat3, etc.
                        # Backends: wgsl, lua, cranelift
 ```
 

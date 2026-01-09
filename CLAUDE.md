@@ -4,13 +4,17 @@ Behavioral rules for Claude Code in this repository.
 
 ## Architecture
 
-**Minimal expression language:** Functions + numeric values, compiled to multiple backends (WGSL, Cranelift, Lua).
+**Dew** is a minimal expression language. Small, ephemeral, perfectly formed—like a droplet condensed from logic. Just dew it.
+
+Functions + numeric values, compiled to multiple backends (WGSL, Cranelift, Lua).
 
 **Crate structure:**
-- `sap-core` - Core AST, types, and expression representation
-- `sap-wgsl` - WGSL code generation backend
-- `sap-cranelift` - Cranelift JIT compilation backend
-- `sap-lua` - Lua code generation backend
+- `dew-core` - Core AST, types, and expression representation
+- `dew-scalar` - Standard scalar math functions (sin, cos, etc.)
+- `dew-linalg` - Linear algebra types and operations
+- `dew-wgsl` - WGSL code generation backend
+- `dew-cranelift` - Cranelift JIT compilation backend
+- `dew-lua` - Lua code generation backend
 
 ## Core Rule
 
