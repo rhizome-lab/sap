@@ -27,6 +27,8 @@ use std::sync::Arc;
 
 mod funcs;
 mod ops;
+#[cfg(test)]
+mod parity_tests;
 
 #[cfg(feature = "wgsl")]
 pub mod wgsl;
