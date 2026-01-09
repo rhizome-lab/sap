@@ -10,8 +10,9 @@
 ### Core
 
 - [x] Define expression AST (functions, numeric values)
-- [ ] Implement type system for expressions
-- [ ] Add expression validation/normalization
+
+Note: No type system in core. Core = syntax only, domains = semantics.
+Each domain crate handles its own types during eval/emit.
 
 ### Backends (now self-contained in domain crates)
 
@@ -70,6 +71,12 @@ Architecture decision: **core = syntax only, domains = semantics**.
 - Quaternions (3D rotations)
 - Dual numbers (autodiff)
 - Rotors/spinors (geometric algebra)
+
+#### Nice to Have (maybe)
+
+- Expression normalization/simplification (constant folding, algebraic simplification)
+  - Would live in domain crates, not core
+  - Could be useful for optimization before JIT compilation
 
 ## Backlog - Architecture
 
