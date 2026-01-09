@@ -34,6 +34,15 @@ use std::sync::Arc;
 mod funcs;
 mod ops;
 
+#[cfg(feature = "wgsl")]
+pub mod wgsl;
+
+#[cfg(feature = "lua")]
+pub mod lua;
+
+#[cfg(feature = "cranelift")]
+pub mod cranelift;
+
 #[cfg(feature = "3d")]
 pub use funcs::Cross;
 pub use funcs::{
@@ -311,6 +320,12 @@ pub fn eval<T: Float>(
 // ============================================================================
 // Tests
 // ============================================================================
+
+#[cfg(test)]
+mod exhaustive_tests;
+
+#[cfg(test)]
+mod parity_tests;
 
 #[cfg(test)]
 mod tests {

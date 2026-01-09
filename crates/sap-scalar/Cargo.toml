@@ -1,27 +1,26 @@
 [package]
-name = "rhizome-sap-linalg"
+name = "rhizome-sap-scalar"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Linear algebra types and operations for sap expressions"
+description = "Standard scalar function library for sap expressions"
 
 [features]
-default = ["3d"]
-3d = []           # Vec3, Mat3
-4d = ["3d"]       # Vec4, Mat4 (implies 3d)
-wgsl = []         # WGSL code generation
-lua = ["mlua"]    # Lua code generation
+default = []
+wgsl = []
+lua = ["mlua"]
 cranelift = ["cranelift-codegen", "cranelift-frontend", "cranelift-jit", "cranelift-module"]
-all = ["3d", "4d", "wgsl", "lua", "cranelift"]
+all = ["wgsl", "lua", "cranelift"]
 
 [dependencies]
-rhizome-sap-core = { workspace = true }
+rhizome-sap-core.workspace = true
 num-traits = "0.2"
 
-# Optional backend dependencies
+# Lua backend
 mlua = { version = "0.10", features = ["luajit", "vendored"], optional = true }
+
+# Cranelift backend
 cranelift-codegen = { version = "0.116", optional = true }
 cranelift-frontend = { version = "0.116", optional = true }
 cranelift-jit = { version = "0.116", optional = true }
 cranelift-module = { version = "0.116", optional = true }
-

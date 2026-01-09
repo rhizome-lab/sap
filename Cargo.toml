@@ -10,8 +10,5 @@ repository = "https://github.com/yourusername/sap"
 
 [workspace.dependencies]
 rhizome-sap-core = { path = "crates/sap-core" }
-rhizome-sap-std = { path = "crates/sap-std" }
-rhizome-sap-wgsl = { path = "crates/sap-wgsl" }
-rhizome-sap-cranelift = { path = "crates/sap-cranelift" }
-rhizome-sap-lua = { path = "crates/sap-lua" }
+rhizome-sap-scalar = { path = "crates/sap-scalar" }
 rhizome-sap-linalg = { path = "crates/sap-linalg" }
