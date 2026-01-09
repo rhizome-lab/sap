@@ -8,6 +8,11 @@
 //! - `3d` (default): Enables Vec3, Mat3
 //! - `4d`: Enables Vec4, Mat4 (implies 3d)
 //!
+//! # Composability
+//!
+//! For composing multiple domain crates (e.g., linalg + rotors), the [`LinalgValue`]
+//! trait allows defining a combined value type that works with both crates.
+//!
 //! # Example
 //!
 //! ```
@@ -89,10 +94,68 @@ impl std::fmt::Display for Type {
 }
 
 // ============================================================================
+// LinalgValue trait (Option 3: generic over value type)
+// ============================================================================
+
+/// Trait for values that support linalg operations.
+///
+/// This enables composing multiple domain crates. Users can define their own
+/// combined enum implementing traits from each domain, then use both crates
+/// with zero conversion.
+///
+/// # Example (composing linalg + rotors)
+///
+/// ```ignore
+/// enum CombinedValue<T> {
+///     Scalar(T),
+///     Vec2([T; 2]),
+///     Vec3([T; 3]),
+///     Rotor2(Rotor2<T>),
+/// }
+///
+/// impl<T: Float> LinalgValue<T> for CombinedValue<T> { ... }
+/// impl<T: Float> RotorValue<T> for CombinedValue<T> { ... }
+/// ```
+pub trait LinalgValue<T: Float>: Clone + PartialEq + Sized + std::fmt::Debug {
+    /// Returns the type of this value.
+    fn typ(&self) -> Type;
+
+    // Construction
+    fn from_scalar(v: T) -> Self;
+    fn from_vec2(v: [T; 2]) -> Self;
+    #[cfg(feature = "3d")]
+    fn from_vec3(v: [T; 3]) -> Self;
+    #[cfg(feature = "4d")]
+    fn from_vec4(v: [T; 4]) -> Self;
+    fn from_mat2(v: [T; 4]) -> Self;
+    #[cfg(feature = "3d")]
+    fn from_mat3(v: [T; 9]) -> Self;
+    #[cfg(feature = "4d")]
+    fn from_mat4(v: [T; 16]) -> Self;
+
+    // Extraction (returns None if wrong type)
+    fn as_scalar(&self) -> Option<T>;
+    fn as_vec2(&self) -> Option<[T; 2]>;
+    #[cfg(feature = "3d")]
+    fn as_vec3(&self) -> Option<[T; 3]>;
+    #[cfg(feature = "4d")]
+    fn as_vec4(&self) -> Option<[T; 4]>;
+    fn as_mat2(&self) -> Option<[T; 4]>;
+    #[cfg(feature = "3d")]
+    fn as_mat3(&self) -> Option<[T; 9]>;
+    #[cfg(feature = "4d")]
+    fn as_mat4(&self) -> Option<[T; 16]>;
+}
+
+// ============================================================================
 // Values
 // ============================================================================
 
 /// A linalg value, generic over numeric type.
+///
+/// This is the default concrete type for standalone use of sap-linalg.
+/// For composing with other domain crates, implement `LinalgValue<T>` for
+/// your own combined enum.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<T> {
     Scalar(T),
@@ -108,6 +171,7 @@ pub enum Value<T> {
     Mat4([T; 16]), // column-major
 }
 
+// Inherent methods for backwards compatibility (don't require Debug bound)
 impl<T> Value<T> {
     /// Returns the type of this value.
     pub fn typ(&self) -> Type {
@@ -132,6 +196,86 @@ impl<T: Copy> Value<T> {
     pub fn as_scalar(&self) -> Option<T> {
         match self {
             Value::Scalar(v) => Some(*v),
+            _ => None,
+        }
+    }
+}
+
+impl<T: Float + std::fmt::Debug> LinalgValue<T> for Value<T> {
+    fn typ(&self) -> Type {
+        // Delegate to inherent method
+        Value::typ(self)
+    }
+
+    fn from_scalar(v: T) -> Self {
+        Value::Scalar(v)
+    }
+    fn from_vec2(v: [T; 2]) -> Self {
+        Value::Vec2(v)
+    }
+    #[cfg(feature = "3d")]
+    fn from_vec3(v: [T; 3]) -> Self {
+        Value::Vec3(v)
+    }
+    #[cfg(feature = "4d")]
+    fn from_vec4(v: [T; 4]) -> Self {
+        Value::Vec4(v)
+    }
+    fn from_mat2(v: [T; 4]) -> Self {
+        Value::Mat2(v)
+    }
+    #[cfg(feature = "3d")]
+    fn from_mat3(v: [T; 9]) -> Self {
+        Value::Mat3(v)
+    }
+    #[cfg(feature = "4d")]
+    fn from_mat4(v: [T; 16]) -> Self {
+        Value::Mat4(v)
+    }
+
+    fn as_scalar(&self) -> Option<T> {
+        match self {
+            Value::Scalar(v) => Some(*v),
+            _ => None,
+        }
+    }
+    fn as_vec2(&self) -> Option<[T; 2]> {
+        match self {
+            Value::Vec2(v) => Some(*v),
+            _ => None,
+        }
+    }
+    #[cfg(feature = "3d")]
+    fn as_vec3(&self) -> Option<[T; 3]> {
+        match self {
+            Value::Vec3(v) => Some(*v),
+            _ => None,
+        }
+    }
+    #[cfg(feature = "4d")]
+    fn as_vec4(&self) -> Option<[T; 4]> {
+        match self {
+            Value::Vec4(v) => Some(*v),
+            _ => None,
+        }
+    }
+    fn as_mat2(&self) -> Option<[T; 4]> {
+        match self {
+            Value::Mat2(v) => Some(*v),
+            _ => None,
+        }
+    }
+    #[cfg(feature = "3d")]
+    fn as_mat3(&self) -> Option<[T; 9]> {
+        match self {
+            Value::Mat3(v) => Some(*v),
+            _ => None,
+        }
+    }
+    #[cfg(feature = "4d")]
+    fn as_mat4(&self) -> Option<[T; 16]> {
+        match self {
+            Value::Mat4(v) => Some(*v),
             _ => None,
         }
     }
