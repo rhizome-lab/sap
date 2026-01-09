@@ -17,6 +17,7 @@ export default withMermaid(
       nav: [
         { text: 'Guide', link: '/introduction' },
         { text: 'Backends', link: '/backends' },
+        { text: 'Rhizome', link: 'https://rhizome-lab.github.io/' },
       ],
 
       sidebar: {
@@ -41,7 +42,7 @@ export default withMermaid(
       },
 
       socialLinks: [
-        { icon: 'github', link: 'https://github.com/yourusername/sap' }
+        { icon: 'github', link: 'https://github.com/rhizome-lab/sap' }
       ],
 
       search: {
@@ -49,7 +50,7 @@ export default withMermaid(
       },
 
       editLink: {
-        pattern: 'https://github.com/yourusername/sap/edit/master/docs/:path',
+        pattern: 'https://github.com/rhizome-lab/sap/edit/master/docs/:path',
         text: 'Edit this page on GitHub'
       },
     },
