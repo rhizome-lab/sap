@@ -21,7 +21,7 @@ export default withMermaid(
       nav: [
         { text: 'Guide', link: '/introduction' },
         { text: 'Backends', link: '/backends/wgsl' },
-        { text: 'Playground', link: '/playground/' },
+        { text: 'Playground', link: '/dew/playground/' },
         { text: 'Rhizome', link: 'https://rhizome-lab.github.io/' },
       ],
 

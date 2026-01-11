@@ -33,6 +33,16 @@ pub struct JsParseResult {
     error: Option<String>,
 }
 
+/// Code generation result for JavaScript.
+#[derive(Serialize)]
+pub struct JsCodeResult {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
 /// Parse a dew expression and return the AST as a JavaScript object.
 #[wasm_bindgen]
 pub fn parse(input: &str) -> JsValue {
@@ -116,25 +126,25 @@ pub fn emit_wgsl(input: &str) -> JsValue {
 
     let result = match Expr::parse(input) {
         Ok(expr) => match wgsl::emit_wgsl(expr.ast()) {
-            Ok(wgsl_expr) => serde_wasm_bindgen::to_value(&serde_json::json!({
-                "ok": true,
-                "code": wgsl_expr.code,
-            }))
-            .unwrap_or(JsValue::NULL),
-            Err(e) => serde_wasm_bindgen::to_value(&serde_json::json!({
-                "ok": false,
-                "error": e.to_string(),
-            }))
-            .unwrap_or(JsValue::NULL),
+            Ok(wgsl_expr) => JsCodeResult {
+                ok: true,
+                code: Some(wgsl_expr.code),
+                error: None,
+            },
+            Err(e) => JsCodeResult {
+                ok: false,
+                code: None,
+                error: Some(e.to_string()),
+            },
         },
-        Err(e) => serde_wasm_bindgen::to_value(&serde_json::json!({
-            "ok": false,
-            "error": e.to_string(),
-        }))
-        .unwrap_or(JsValue::NULL),
+        Err(e) => JsCodeResult {
+            ok: false,
+            code: None,
+            error: Some(e.to_string()),
+        },
     };
 
-    result
+    serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
 }
 
 /// Generate Lua code from an expression.
@@ -144,25 +154,25 @@ pub fn emit_lua(input: &str) -> JsValue {
 
     let result = match Expr::parse(input) {
         Ok(expr) => match lua::emit_lua(expr.ast()) {
-            Ok(lua_expr) => serde_wasm_bindgen::to_value(&serde_json::json!({
-                "ok": true,
-                "code": lua_expr.code,
-            }))
-            .unwrap_or(JsValue::NULL),
-            Err(e) => serde_wasm_bindgen::to_value(&serde_json::json!({
-                "ok": false,
-                "error": e.to_string(),
-            }))
-            .unwrap_or(JsValue::NULL),
+            Ok(lua_expr) => JsCodeResult {
+                ok: true,
+                code: Some(lua_expr.code),
+                error: None,
+            },
+            Err(e) => JsCodeResult {
+                ok: false,
+                code: None,
+                error: Some(e.to_string()),
+            },
         },
-        Err(e) => serde_wasm_bindgen::to_value(&serde_json::json!({
-            "ok": false,
-            "error": e.to_string(),
-        }))
-        .unwrap_or(JsValue::NULL),
+        Err(e) => JsCodeResult {
+            ok: false,
+            code: None,
+            error: Some(e.to_string()),
+        },
     };
 
-    result
+    serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
 }
 
 // Tests are run via wasm-bindgen-test in the browser or node environment

@@ -4,7 +4,7 @@
 
 :root {
   /* Base Colors (Dark Mode Default) */
-  --bg-app: oklch(12% 0.02 260);
+  --bg-app: oklch(12% 0.02 260 / 0.85);
 
   /* Semantic Backgrounds using OKLCH with transparency */
   --bg-panel: oklch(100% 0 0 / 0.03);
@@ -49,7 +49,7 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg-app: oklch(98% 0 0);
+    --bg-app: oklch(98% 0 0 / 0.85);
     --bg-panel: oklch(0% 0 0 / 0.03);
     --bg-element: oklch(0% 0 0 / 0.08);
     --bg-element-hover: oklch(0% 0 0 / 0.12);
