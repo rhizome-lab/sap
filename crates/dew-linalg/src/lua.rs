@@ -1034,6 +1034,237 @@ end
 "#
 }
 
+// ============================================================================
+// Execution via mlua (requires "lua" feature)
+// ============================================================================
+
+#[cfg(feature = "lua")]
+use crate::Value;
+
+#[cfg(feature = "lua")]
+/// Error during Lua evaluation.
+#[derive(Debug)]
+pub enum EvalError {
+    /// Emission error.
+    Emit(LuaError),
+    /// Lua runtime error.
+    Lua(mlua::Error),
+    /// Type conversion error.
+    TypeConversion(String),
+}
+
+#[cfg(feature = "lua")]
+impl std::fmt::Display for EvalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EvalError::Emit(e) => write!(f, "emit error: {e}"),
+            EvalError::Lua(e) => write!(f, "lua error: {e}"),
+            EvalError::TypeConversion(e) => write!(f, "type conversion error: {e}"),
+        }
+    }
+}
+
+#[cfg(feature = "lua")]
+impl std::error::Error for EvalError {}
+
+#[cfg(feature = "lua")]
+/// Compiles and evaluates an expression with mlua.
+pub fn eval_lua<T: num_traits::Float + mlua::IntoLua + mlua::FromLua>(
+    ast: &rhizome_dew_core::Ast,
+    vars: &HashMap<String, Value<T>>,
+) -> Result<Value<T>, EvalError> {
+    use mlua::Value as LuaValue;
+
+    let lua = mlua::Lua::new();
+    let globals = lua.globals();
+
+    // Load helper functions
+    lua.load(lua_helpers()).exec().map_err(EvalError::Lua)?;
+
+    // Build var_types map and set variables in Lua
+    let mut var_types = HashMap::new();
+    for (name, value) in vars {
+        var_types.insert(name.clone(), value.typ());
+        set_lua_var(&lua, &globals, name, value).map_err(EvalError::Lua)?;
+    }
+
+    // Emit Lua code
+    let expr = emit_lua(ast, &var_types).map_err(EvalError::Emit)?;
+    let result_type = expr.typ;
+
+    // Execute
+    let lua_result: LuaValue = lua
+        .load(format!("return {}", expr.code))
+        .eval()
+        .map_err(EvalError::Lua)?;
+
+    // Convert back to Value<T>
+    lua_to_value(&lua_result, result_type)
+}
+
+#[cfg(feature = "lua")]
+fn set_lua_var<T: num_traits::Float + mlua::IntoLua>(
+    lua: &mlua::Lua,
+    globals: &mlua::Table,
+    name: &str,
+    value: &Value<T>,
+) -> Result<(), mlua::Error> {
+    match value {
+        Value::Scalar(s) => {
+            globals.set(name, (*s).into_lua(lua)?)?;
+        }
+        Value::Vec2(v) => {
+            let table = lua.create_table()?;
+            table.set(1, v[0].into_lua(lua)?)?;
+            table.set(2, v[1].into_lua(lua)?)?;
+            globals.set(name, table)?;
+        }
+        #[cfg(feature = "3d")]
+        Value::Vec3(v) => {
+            let table = lua.create_table()?;
+            table.set(1, v[0].into_lua(lua)?)?;
+            table.set(2, v[1].into_lua(lua)?)?;
+            table.set(3, v[2].into_lua(lua)?)?;
+            globals.set(name, table)?;
+        }
+        #[cfg(feature = "4d")]
+        Value::Vec4(v) => {
+            let table = lua.create_table()?;
+            for (i, val) in v.iter().enumerate() {
+                table.set(i + 1, (*val).into_lua(lua)?)?;
+            }
+            globals.set(name, table)?;
+        }
+        Value::Mat2(m) => {
+            let table = lua.create_table()?;
+            for (i, val) in m.iter().enumerate() {
+                table.set(i + 1, (*val).into_lua(lua)?)?;
+            }
+            globals.set(name, table)?;
+        }
+        #[cfg(feature = "3d")]
+        Value::Mat3(m) => {
+            let table = lua.create_table()?;
+            for (i, val) in m.iter().enumerate() {
+                table.set(i + 1, (*val).into_lua(lua)?)?;
+            }
+            globals.set(name, table)?;
+        }
+        #[cfg(feature = "4d")]
+        Value::Mat4(m) => {
+            let table = lua.create_table()?;
+            for (i, val) in m.iter().enumerate() {
+                table.set(i + 1, (*val).into_lua(lua)?)?;
+            }
+            globals.set(name, table)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "lua")]
+fn lua_to_value<T: num_traits::Float + mlua::FromLua>(
+    lua_val: &mlua::Value,
+    typ: Type,
+) -> Result<Value<T>, EvalError> {
+    use mlua::Value as LuaValue;
+
+    match typ {
+        Type::Scalar => {
+            if let LuaValue::Number(n) = lua_val {
+                Ok(Value::Scalar(T::from(*n).ok_or_else(|| {
+                    EvalError::TypeConversion("failed to convert number".into())
+                })?))
+            } else if let LuaValue::Integer(n) = lua_val {
+                Ok(Value::Scalar(T::from(*n).ok_or_else(|| {
+                    EvalError::TypeConversion("failed to convert integer".into())
+                })?))
+            } else {
+                Err(EvalError::TypeConversion(format!(
+                    "expected number, got {:?}",
+                    lua_val
+                )))
+            }
+        }
+        Type::Vec2 => {
+            let table = lua_val
+                .as_table()
+                .ok_or_else(|| EvalError::TypeConversion("expected table for Vec2".into()))?;
+            let v1: f64 = table.get(1).map_err(EvalError::Lua)?;
+            let v2: f64 = table.get(2).map_err(EvalError::Lua)?;
+            Ok(Value::Vec2([
+                T::from(v1).ok_or_else(|| EvalError::TypeConversion("vec2[1]".into()))?,
+                T::from(v2).ok_or_else(|| EvalError::TypeConversion("vec2[2]".into()))?,
+            ]))
+        }
+        #[cfg(feature = "3d")]
+        Type::Vec3 => {
+            let table = lua_val
+                .as_table()
+                .ok_or_else(|| EvalError::TypeConversion("expected table for Vec3".into()))?;
+            let v1: f64 = table.get(1).map_err(EvalError::Lua)?;
+            let v2: f64 = table.get(2).map_err(EvalError::Lua)?;
+            let v3: f64 = table.get(3).map_err(EvalError::Lua)?;
+            Ok(Value::Vec3([
+                T::from(v1).ok_or_else(|| EvalError::TypeConversion("vec3[1]".into()))?,
+                T::from(v2).ok_or_else(|| EvalError::TypeConversion("vec3[2]".into()))?,
+                T::from(v3).ok_or_else(|| EvalError::TypeConversion("vec3[3]".into()))?,
+            ]))
+        }
+        #[cfg(feature = "4d")]
+        Type::Vec4 => {
+            let table = lua_val
+                .as_table()
+                .ok_or_else(|| EvalError::TypeConversion("expected table for Vec4".into()))?;
+            let mut arr = [T::zero(); 4];
+            for i in 0..4 {
+                let v: f64 = table.get(i + 1).map_err(EvalError::Lua)?;
+                arr[i] = T::from(v)
+                    .ok_or_else(|| EvalError::TypeConversion(format!("vec4[{}]", i + 1)))?;
+            }
+            Ok(Value::Vec4(arr))
+        }
+        Type::Mat2 => {
+            let table = lua_val
+                .as_table()
+                .ok_or_else(|| EvalError::TypeConversion("expected table for Mat2".into()))?;
+            let mut arr = [T::zero(); 4];
+            for i in 0..4 {
+                let v: f64 = table.get(i + 1).map_err(EvalError::Lua)?;
+                arr[i] = T::from(v)
+                    .ok_or_else(|| EvalError::TypeConversion(format!("mat2[{}]", i + 1)))?;
+            }
+            Ok(Value::Mat2(arr))
+        }
+        #[cfg(feature = "3d")]
+        Type::Mat3 => {
+            let table = lua_val
+                .as_table()
+                .ok_or_else(|| EvalError::TypeConversion("expected table for Mat3".into()))?;
+            let mut arr = [T::zero(); 9];
+            for i in 0..9 {
+                let v: f64 = table.get(i + 1).map_err(EvalError::Lua)?;
+                arr[i] = T::from(v)
+                    .ok_or_else(|| EvalError::TypeConversion(format!("mat3[{}]", i + 1)))?;
+            }
+            Ok(Value::Mat3(arr))
+        }
+        #[cfg(feature = "4d")]
+        Type::Mat4 => {
+            let table = lua_val
+                .as_table()
+                .ok_or_else(|| EvalError::TypeConversion("expected table for Mat4".into()))?;
+            let mut arr = [T::zero(); 16];
+            for i in 0..16 {
+                let v: f64 = table.get(i + 1).map_err(EvalError::Lua)?;
+                arr[i] = T::from(v)
+                    .ok_or_else(|| EvalError::TypeConversion(format!("mat4[{}]", i + 1)))?;
+            }
+            Ok(Value::Mat4(arr))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

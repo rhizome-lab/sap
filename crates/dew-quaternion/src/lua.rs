@@ -1,9 +1,9 @@
-//! Lua code generation for quaternion expressions.
+//! Lua code generation and evaluation for quaternion expressions.
 //!
 //! Quaternions are represented as tables {x, y, z, w}.
 //! Vectors are tables {x, y, z}.
 
-use crate::Type;
+use crate::{Type, Value};
 use rhizome_dew_cond::lua as cond;
 use rhizome_dew_core::{Ast, BinOp, UnaryOp};
 use std::collections::HashMap;
@@ -637,6 +637,153 @@ fn emit_function_call(name: &str, args: Vec<LuaExpr>) -> Result<LuaExpr, LuaErro
         }
 
         _ => Err(LuaError::UnknownFunction(name.to_string())),
+    }
+}
+
+// ============================================================================
+// Lua Evaluation
+// ============================================================================
+
+/// Error during Lua evaluation.
+#[derive(Debug)]
+pub enum EvalError {
+    /// Code generation failed.
+    CodeGen(LuaError),
+    /// Lua runtime error.
+    Runtime(String),
+    /// Result type conversion failed.
+    ResultConversion(String),
+}
+
+impl std::fmt::Display for EvalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EvalError::CodeGen(e) => write!(f, "code generation error: {e}"),
+            EvalError::Runtime(e) => write!(f, "lua runtime error: {e}"),
+            EvalError::ResultConversion(e) => write!(f, "result conversion error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for EvalError {}
+
+impl From<LuaError> for EvalError {
+    fn from(e: LuaError) -> Self {
+        EvalError::CodeGen(e)
+    }
+}
+
+/// Evaluate an expression using Lua.
+///
+/// This creates a Lua VM, sets up variables, emits the expression as Lua code,
+/// and executes it, returning the result as a Value.
+#[cfg(feature = "lua")]
+pub fn eval_lua<T: num_traits::Float + mlua::IntoLua + mlua::FromLua>(
+    ast: &Ast,
+    vars: &HashMap<String, Value<T>>,
+) -> Result<Value<T>, EvalError> {
+    use mlua::Lua;
+
+    // Build var_types map for emit_lua
+    let var_types: HashMap<String, Type> = vars.iter().map(|(k, v)| (k.clone(), v.typ())).collect();
+
+    // Generate Lua code
+    let lua_expr = emit_lua(ast, &var_types)?;
+
+    // Create Lua VM
+    let lua = Lua::new();
+
+    // Set up variables
+    for (name, value) in vars {
+        set_lua_var(&lua, name, value).map_err(|e| EvalError::Runtime(e.to_string()))?;
+    }
+
+    // Execute and convert result
+    let code = format!("return {}", lua_expr.code);
+    let result: mlua::Value = lua
+        .load(&code)
+        .eval()
+        .map_err(|e| EvalError::Runtime(e.to_string()))?;
+
+    lua_to_value(&result, lua_expr.typ)
+}
+
+/// Set a Lua variable from a Value.
+#[cfg(feature = "lua")]
+fn set_lua_var<T: num_traits::Float + mlua::IntoLua>(
+    lua: &mlua::Lua,
+    name: &str,
+    value: &Value<T>,
+) -> mlua::Result<()> {
+    let globals = lua.globals();
+    match value {
+        Value::Scalar(s) => {
+            globals.set(name, s.clone())?;
+        }
+        Value::Vec3(v) => {
+            let table = lua.create_table()?;
+            table.set(1, v[0].clone())?;
+            table.set(2, v[1].clone())?;
+            table.set(3, v[2].clone())?;
+            globals.set(name, table)?;
+        }
+        Value::Quaternion(q) => {
+            let table = lua.create_table()?;
+            table.set(1, q[0].clone())?;
+            table.set(2, q[1].clone())?;
+            table.set(3, q[2].clone())?;
+            table.set(4, q[3].clone())?;
+            globals.set(name, table)?;
+        }
+    }
+    Ok(())
+}
+
+/// Convert a Lua value back to a Value.
+#[cfg(feature = "lua")]
+fn lua_to_value<T: num_traits::Float + mlua::FromLua>(
+    lua_val: &mlua::Value,
+    expected_type: Type,
+) -> Result<Value<T>, EvalError> {
+    match expected_type {
+        Type::Scalar => {
+            let n = T::from_lua(lua_val.clone(), &mlua::Lua::new())
+                .map_err(|e| EvalError::ResultConversion(e.to_string()))?;
+            Ok(Value::Scalar(n))
+        }
+        Type::Vec3 => {
+            let table = lua_val
+                .as_table()
+                .ok_or_else(|| EvalError::ResultConversion("expected table for Vec3".into()))?;
+            let x: T = table
+                .get(1)
+                .map_err(|e| EvalError::ResultConversion(e.to_string()))?;
+            let y: T = table
+                .get(2)
+                .map_err(|e| EvalError::ResultConversion(e.to_string()))?;
+            let z: T = table
+                .get(3)
+                .map_err(|e| EvalError::ResultConversion(e.to_string()))?;
+            Ok(Value::Vec3([x, y, z]))
+        }
+        Type::Quaternion => {
+            let table = lua_val.as_table().ok_or_else(|| {
+                EvalError::ResultConversion("expected table for Quaternion".into())
+            })?;
+            let x: T = table
+                .get(1)
+                .map_err(|e| EvalError::ResultConversion(e.to_string()))?;
+            let y: T = table
+                .get(2)
+                .map_err(|e| EvalError::ResultConversion(e.to_string()))?;
+            let z: T = table
+                .get(3)
+                .map_err(|e| EvalError::ResultConversion(e.to_string()))?;
+            let w: T = table
+                .get(4)
+                .map_err(|e| EvalError::ResultConversion(e.to_string()))?;
+            Ok(Value::Quaternion([x, y, z, w]))
+        }
     }
 }
 

@@ -489,6 +489,130 @@ fn emit_function_call(name: &str, args: Vec<LuaExpr>) -> Result<LuaExpr, LuaErro
     }
 }
 
+// ============================================================================
+// Execution via mlua (requires "lua" feature)
+// ============================================================================
+
+#[cfg(feature = "lua")]
+use crate::Value;
+
+#[cfg(feature = "lua")]
+/// Error during Lua evaluation.
+#[derive(Debug)]
+pub enum EvalError {
+    /// Emission error.
+    Emit(LuaError),
+    /// Lua runtime error.
+    Lua(mlua::Error),
+    /// Type conversion error.
+    TypeConversion(String),
+}
+
+#[cfg(feature = "lua")]
+impl std::fmt::Display for EvalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EvalError::Emit(e) => write!(f, "emit error: {e}"),
+            EvalError::Lua(e) => write!(f, "lua error: {e}"),
+            EvalError::TypeConversion(e) => write!(f, "type conversion error: {e}"),
+        }
+    }
+}
+
+#[cfg(feature = "lua")]
+impl std::error::Error for EvalError {}
+
+#[cfg(feature = "lua")]
+/// Compiles and evaluates an expression with mlua.
+pub fn eval_lua<T: num_traits::Float + mlua::IntoLua + mlua::FromLua>(
+    ast: &rhizome_dew_core::Ast,
+    vars: &HashMap<String, Value<T>>,
+) -> Result<Value<T>, EvalError> {
+    use mlua::Value as LuaValue;
+
+    let lua = mlua::Lua::new();
+    let globals = lua.globals();
+
+    // Build var_types map and set variables in Lua
+    let mut var_types = HashMap::new();
+    for (name, value) in vars {
+        var_types.insert(name.clone(), value.typ());
+        set_lua_var(&lua, &globals, name, value).map_err(EvalError::Lua)?;
+    }
+
+    // Emit Lua code
+    let expr = emit_lua(ast, &var_types).map_err(EvalError::Emit)?;
+    let result_type = expr.typ;
+
+    // Execute
+    let lua_result: LuaValue = lua
+        .load(format!("return {}", expr.code))
+        .eval()
+        .map_err(EvalError::Lua)?;
+
+    // Convert back to Value<T>
+    lua_to_value(&lua_result, result_type)
+}
+
+#[cfg(feature = "lua")]
+fn set_lua_var<T: num_traits::Float + mlua::IntoLua>(
+    lua: &mlua::Lua,
+    globals: &mlua::Table,
+    name: &str,
+    value: &Value<T>,
+) -> Result<(), mlua::Error> {
+    match value {
+        Value::Scalar(s) => {
+            globals.set(name, (*s).into_lua(lua)?)?;
+        }
+        Value::Complex(c) => {
+            let table = lua.create_table()?;
+            table.set(1, c[0].into_lua(lua)?)?;
+            table.set(2, c[1].into_lua(lua)?)?;
+            globals.set(name, table)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "lua")]
+fn lua_to_value<T: num_traits::Float + mlua::FromLua>(
+    lua_val: &mlua::Value,
+    typ: Type,
+) -> Result<Value<T>, EvalError> {
+    use mlua::Value as LuaValue;
+
+    match typ {
+        Type::Scalar => {
+            if let LuaValue::Number(n) = lua_val {
+                Ok(Value::Scalar(T::from(*n).ok_or_else(|| {
+                    EvalError::TypeConversion("failed to convert number".into())
+                })?))
+            } else if let LuaValue::Integer(n) = lua_val {
+                Ok(Value::Scalar(T::from(*n).ok_or_else(|| {
+                    EvalError::TypeConversion("failed to convert integer".into())
+                })?))
+            } else {
+                Err(EvalError::TypeConversion(format!(
+                    "expected number, got {:?}",
+                    lua_val
+                )))
+            }
+        }
+        Type::Complex => {
+            let table = lua_val
+                .as_table()
+                .ok_or_else(|| EvalError::TypeConversion("expected table for Complex".into()))?;
+            let re: f64 = table.get(1).map_err(EvalError::Lua)?;
+            let im: f64 = table.get(2).map_err(EvalError::Lua)?;
+            Ok(Value::Complex([
+                T::from(re).ok_or_else(|| EvalError::TypeConversion("complex[1]".into()))?,
+                T::from(im).ok_or_else(|| EvalError::TypeConversion("complex[2]".into()))?,
+            ]))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
