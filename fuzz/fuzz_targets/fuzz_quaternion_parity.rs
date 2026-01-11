@@ -5,7 +5,7 @@
 //! Generates expressions that are always well-typed, tracking types through
 //! the expression tree to ensure valid operations.
 //!
-//! Tests eval (interpreter) vs Lua vs Cranelift JIT for scalar-returning expressions.
+//! Tests eval (interpreter) vs Lua vs Cranelift JIT for scalar, vec3, and quaternion expressions.
 
 use arbitrary::{Arbitrary, Unstructured};
 use libfuzzer_sys::fuzz_target;
@@ -271,6 +271,7 @@ fn generate_quat(
 #[derive(Debug)]
 struct QuaternionParityInput {
     expr: String,
+    output_type: QType,
     scalar_values: HashMap<String, f32>,
     vec3_values: HashMap<String, [f32; 3]>,
     quat_values: HashMap<String, [f32; 4]>,
@@ -280,8 +281,12 @@ impl<'a> Arbitrary<'a> for QuaternionParityInput {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         let vars = VarDefs::new();
 
-        // Generate scalar-returning expression (JIT only supports scalar output)
-        let typed_expr = generate_scalar(u, &vars, 4)?;
+        // Randomly choose output type
+        let typed_expr = match u.int_in_range(0..=2)? {
+            0 => generate_scalar(u, &vars, 4)?,
+            1 => generate_vec3(u, &vars, 4)?,
+            _ => generate_quat(u, &vars, 4)?,
+        };
 
         // Generate variable values
         let mut scalar_values = HashMap::new();
@@ -321,6 +326,7 @@ impl<'a> Arbitrary<'a> for QuaternionParityInput {
 
         Ok(QuaternionParityInput {
             expr: typed_expr.expr,
+            output_type: typed_expr.typ,
             scalar_values,
             vec3_values,
             quat_values,
@@ -341,6 +347,16 @@ fn approx_eq(a: f32, b: f32) -> bool {
     }
     let diff = (a - b).abs();
     diff < 1e-4 || diff / a.abs().max(b.abs()).max(1e-10) < 1e-4
+}
+
+/// Compare two vec3 values.
+fn vec3_approx_eq(a: &[f32; 3], b: &[f32; 3]) -> bool {
+    approx_eq(a[0], b[0]) && approx_eq(a[1], b[1]) && approx_eq(a[2], b[2])
+}
+
+/// Compare two quaternion values.
+fn quat_approx_eq(a: &[f32; 4], b: &[f32; 4]) -> bool {
+    approx_eq(a[0], b[0]) && approx_eq(a[1], b[1]) && approx_eq(a[2], b[2]) && approx_eq(a[3], b[3])
 }
 
 fuzz_target!(|input: QuaternionParityInput| {
@@ -368,64 +384,153 @@ fuzz_target!(|input: QuaternionParityInput| {
         return;
     };
 
-    // Must be scalar for JIT comparison
-    let Value::Scalar(eval_scalar) = eval_val else {
-        return;
+    // Verify output type matches expected
+    let actual_type = match &eval_val {
+        Value::Scalar(_) => QType::Scalar,
+        Value::Vec3(_) => QType::Vec3,
+        Value::Quaternion(_) => QType::Quaternion,
     };
+    if actual_type != input.output_type {
+        // Type inference mismatch - skip this test case
+        return;
+    }
 
-    // 2. Lua evaluation
-    if let Ok(lua_val) = eval_lua(expr.ast(), &var_map) {
-        let Value::Scalar(lua_scalar) = lua_val else {
-            panic!(
-                "LUA TYPE MISMATCH: expected Scalar, got {:?}\nExpr: {}",
-                lua_val, input.expr
-            );
-        };
-
-        if !approx_eq(eval_scalar, lua_scalar) {
-            panic!(
-                "PARITY MISMATCH: eval vs lua\nExpr: {}\nVars: {:?}\nEval: {}\nLua: {}",
-                input.expr, var_map, eval_scalar, lua_scalar
-            );
+    // Build JIT args (shared between all paths)
+    let free_vars: Vec<&str> = expr.free_vars().into_iter().collect();
+    let mut args: Vec<f32> = Vec::new();
+    for var in &free_vars {
+        match &var_map[*var] {
+            Value::Scalar(s) => args.push(*s),
+            Value::Vec3(v) => {
+                args.push(v[0]);
+                args.push(v[1]);
+                args.push(v[2]);
+            }
+            Value::Quaternion(q) => {
+                args.push(q[0]);
+                args.push(q[1]);
+                args.push(q[2]);
+                args.push(q[3]);
+            }
         }
     }
 
-    // 3. Cranelift JIT
-    let free_vars: Vec<&str> = expr.free_vars().into_iter().collect();
-    if let Ok(jit) = QuaternionJit::new() {
-        // Build VarSpec list
-        let var_specs: Vec<VarSpec> = free_vars
-            .iter()
-            .map(|v| VarSpec::new(*v, var_map[*v].typ()))
-            .collect();
+    match input.output_type {
+        QType::Scalar => {
+            let Value::Scalar(eval_scalar) = eval_val else { unreachable!() };
 
-        if let Ok(compiled) = jit.compile_scalar(expr.ast(), &var_specs) {
-            // Flatten arguments
-            let mut args: Vec<f32> = Vec::new();
-            for var in &free_vars {
-                match &var_map[*var] {
-                    Value::Scalar(s) => args.push(*s),
-                    Value::Vec3(v) => {
-                        args.push(v[0]);
-                        args.push(v[1]);
-                        args.push(v[2]);
-                    }
-                    Value::Quaternion(q) => {
-                        args.push(q[0]);
-                        args.push(q[1]);
-                        args.push(q[2]);
-                        args.push(q[3]);
-                    }
+            // 2. Lua evaluation
+            if let Ok(lua_val) = eval_lua(expr.ast(), &var_map) {
+                let Value::Scalar(lua_scalar) = lua_val else {
+                    panic!(
+                        "LUA TYPE MISMATCH: expected Scalar, got {:?}\nExpr: {}",
+                        lua_val, input.expr
+                    );
+                };
+
+                if !approx_eq(eval_scalar, lua_scalar) {
+                    panic!(
+                        "PARITY MISMATCH: eval vs lua\nExpr: {}\nVars: {:?}\nEval: {}\nLua: {}",
+                        input.expr, var_map, eval_scalar, lua_scalar
+                    );
                 }
             }
 
-            let jit_val = compiled.call(&args);
+            // 3. Cranelift JIT (scalar)
+            if let Ok(jit) = QuaternionJit::new() {
+                let var_specs: Vec<VarSpec> = free_vars
+                    .iter()
+                    .map(|v| VarSpec::new(*v, var_map[*v].typ()))
+                    .collect();
 
-            if !approx_eq(eval_scalar, jit_val) {
-                panic!(
-                    "PARITY MISMATCH: eval vs cranelift\nExpr: {}\nVars: {:?}\nEval: {}\nJIT: {}",
-                    input.expr, var_map, eval_scalar, jit_val
-                );
+                if let Ok(compiled) = jit.compile_scalar(expr.ast(), &var_specs) {
+                    let jit_val = compiled.call(&args);
+
+                    if !approx_eq(eval_scalar, jit_val) {
+                        panic!(
+                            "PARITY MISMATCH: eval vs cranelift\nExpr: {}\nVars: {:?}\nEval: {}\nJIT: {}",
+                            input.expr, var_map, eval_scalar, jit_val
+                        );
+                    }
+                }
+            }
+        }
+        QType::Vec3 => {
+            let Value::Vec3(eval_vec3) = eval_val else { unreachable!() };
+
+            // 2. Lua evaluation
+            if let Ok(lua_val) = eval_lua(expr.ast(), &var_map) {
+                let Value::Vec3(lua_vec3) = lua_val else {
+                    panic!(
+                        "LUA TYPE MISMATCH: expected Vec3, got {:?}\nExpr: {}",
+                        lua_val, input.expr
+                    );
+                };
+
+                if !vec3_approx_eq(&eval_vec3, &lua_vec3) {
+                    panic!(
+                        "PARITY MISMATCH: eval vs lua\nExpr: {}\nVars: {:?}\nEval: {:?}\nLua: {:?}",
+                        input.expr, var_map, eval_vec3, lua_vec3
+                    );
+                }
+            }
+
+            // 3. Cranelift JIT (vec3)
+            if let Ok(jit) = QuaternionJit::new() {
+                let var_specs: Vec<VarSpec> = free_vars
+                    .iter()
+                    .map(|v| VarSpec::new(*v, var_map[*v].typ()))
+                    .collect();
+
+                if let Ok(compiled) = jit.compile_vec3(expr.ast(), &var_specs) {
+                    let jit_val = compiled.call(&args);
+
+                    if !vec3_approx_eq(&eval_vec3, &jit_val) {
+                        panic!(
+                            "PARITY MISMATCH: eval vs cranelift\nExpr: {}\nVars: {:?}\nEval: {:?}\nJIT: {:?}",
+                            input.expr, var_map, eval_vec3, jit_val
+                        );
+                    }
+                }
+            }
+        }
+        QType::Quaternion => {
+            let Value::Quaternion(eval_quat) = eval_val else { unreachable!() };
+
+            // 2. Lua evaluation
+            if let Ok(lua_val) = eval_lua(expr.ast(), &var_map) {
+                let Value::Quaternion(lua_quat) = lua_val else {
+                    panic!(
+                        "LUA TYPE MISMATCH: expected Quaternion, got {:?}\nExpr: {}",
+                        lua_val, input.expr
+                    );
+                };
+
+                if !quat_approx_eq(&eval_quat, &lua_quat) {
+                    panic!(
+                        "PARITY MISMATCH: eval vs lua\nExpr: {}\nVars: {:?}\nEval: {:?}\nLua: {:?}",
+                        input.expr, var_map, eval_quat, lua_quat
+                    );
+                }
+            }
+
+            // 3. Cranelift JIT (quaternion)
+            if let Ok(jit) = QuaternionJit::new() {
+                let var_specs: Vec<VarSpec> = free_vars
+                    .iter()
+                    .map(|v| VarSpec::new(*v, var_map[*v].typ()))
+                    .collect();
+
+                if let Ok(compiled) = jit.compile_quaternion(expr.ast(), &var_specs) {
+                    let jit_val = compiled.call(&args);
+
+                    if !quat_approx_eq(&eval_quat, &jit_val) {
+                        panic!(
+                            "PARITY MISMATCH: eval vs cranelift\nExpr: {}\nVars: {:?}\nEval: {:?}\nJIT: {:?}",
+                            input.expr, var_map, eval_quat, jit_val
+                        );
+                    }
+                }
             }
         }
     }

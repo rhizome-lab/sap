@@ -5,7 +5,7 @@
 //! Generates expressions that are always well-typed, tracking types through
 //! the expression tree to ensure valid operations.
 //!
-//! Tests eval (interpreter) vs Lua vs Cranelift JIT for scalar-returning expressions.
+//! Tests eval (interpreter) vs Lua vs Cranelift JIT for both scalar and complex expressions.
 
 use arbitrary::{Arbitrary, Unstructured};
 use libfuzzer_sys::fuzz_target;
@@ -212,6 +212,7 @@ fn generate_any(
 #[derive(Debug)]
 struct ComplexParityInput {
     expr: String,
+    output_type: CType,
     scalar_values: HashMap<String, f32>,
     complex_values: HashMap<String, [f32; 2]>,
 }
@@ -220,8 +221,12 @@ impl<'a> Arbitrary<'a> for ComplexParityInput {
     fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
         let vars = VarDefs::new();
 
-        // Generate scalar-returning expression (JIT only supports scalar output)
-        let typed_expr = generate_scalar(u, &vars, 4)?;
+        // Randomly choose scalar or complex output type
+        let typed_expr = if u.ratio(1, 2)? {
+            generate_scalar(u, &vars, 4)?
+        } else {
+            generate_complex(u, &vars, 4)?
+        };
 
         // Generate variable values
         let mut scalar_values = HashMap::new();
@@ -242,6 +247,7 @@ impl<'a> Arbitrary<'a> for ComplexParityInput {
 
         Ok(ComplexParityInput {
             expr: typed_expr.expr,
+            output_type: typed_expr.typ,
             scalar_values,
             complex_values,
         })
@@ -261,6 +267,11 @@ fn approx_eq(a: f32, b: f32) -> bool {
     }
     let diff = (a - b).abs();
     diff < 1e-4 || diff / a.abs().max(b.abs()).max(1e-10) < 1e-4
+}
+
+/// Compare two complex values.
+fn complex_approx_eq(a: &[f32; 2], b: &[f32; 2]) -> bool {
+    approx_eq(a[0], b[0]) && approx_eq(a[1], b[1])
 }
 
 fuzz_target!(|input: ComplexParityInput| {
@@ -285,57 +296,106 @@ fuzz_target!(|input: ComplexParityInput| {
         return;
     };
 
-    // Must be scalar for JIT comparison
-    let Value::Scalar(eval_scalar) = eval_val else {
-        return;
+    // Verify output type matches expected
+    let actual_type = match &eval_val {
+        Value::Scalar(_) => CType::Scalar,
+        Value::Complex(_) => CType::Complex,
     };
+    if actual_type != input.output_type {
+        // Type inference mismatch - skip this test case
+        return;
+    }
 
-    // 2. Lua evaluation
-    if let Ok(lua_val) = eval_lua(expr.ast(), &var_map) {
-        let Value::Scalar(lua_scalar) = lua_val else {
-            panic!(
-                "LUA TYPE MISMATCH: expected Scalar, got {:?}\nExpr: {}",
-                lua_val, input.expr
-            );
-        };
-
-        if !approx_eq(eval_scalar, lua_scalar) {
-            panic!(
-                "PARITY MISMATCH: eval vs lua\nExpr: {}\nVars: {:?}\nEval: {}\nLua: {}",
-                input.expr, var_map, eval_scalar, lua_scalar
-            );
+    // Build JIT args (shared between scalar and complex paths)
+    let free_vars: Vec<&str> = expr.free_vars().into_iter().collect();
+    let mut args: Vec<f32> = Vec::new();
+    for var in &free_vars {
+        match &var_map[*var] {
+            Value::Scalar(s) => args.push(*s),
+            Value::Complex(c) => {
+                args.push(c[0]);
+                args.push(c[1]);
+            }
         }
     }
 
-    // 3. Cranelift JIT
-    let free_vars: Vec<&str> = expr.free_vars().into_iter().collect();
-    if let Ok(jit) = ComplexJit::new() {
-        // Build VarSpec list
-        let var_specs: Vec<VarSpec> = free_vars
-            .iter()
-            .map(|v| VarSpec::new(*v, var_map[*v].typ()))
-            .collect();
+    match input.output_type {
+        CType::Scalar => {
+            let Value::Scalar(eval_scalar) = eval_val else { unreachable!() };
 
-        if let Ok(compiled) = jit.compile_scalar(expr.ast(), &var_specs) {
-            // Flatten arguments (scalar = 1 f32, complex = 2 f32s)
-            let mut args: Vec<f32> = Vec::new();
-            for var in &free_vars {
-                match &var_map[*var] {
-                    Value::Scalar(s) => args.push(*s),
-                    Value::Complex(c) => {
-                        args.push(c[0]);
-                        args.push(c[1]);
-                    }
+            // 2. Lua evaluation
+            if let Ok(lua_val) = eval_lua(expr.ast(), &var_map) {
+                let Value::Scalar(lua_scalar) = lua_val else {
+                    panic!(
+                        "LUA TYPE MISMATCH: expected Scalar, got {:?}\nExpr: {}",
+                        lua_val, input.expr
+                    );
+                };
+
+                if !approx_eq(eval_scalar, lua_scalar) {
+                    panic!(
+                        "PARITY MISMATCH: eval vs lua\nExpr: {}\nVars: {:?}\nEval: {}\nLua: {}",
+                        input.expr, var_map, eval_scalar, lua_scalar
+                    );
                 }
             }
 
-            let jit_val = compiled.call(&args);
+            // 3. Cranelift JIT (scalar)
+            if let Ok(jit) = ComplexJit::new() {
+                let var_specs: Vec<VarSpec> = free_vars
+                    .iter()
+                    .map(|v| VarSpec::new(*v, var_map[*v].typ()))
+                    .collect();
 
-            if !approx_eq(eval_scalar, jit_val) {
-                panic!(
-                    "PARITY MISMATCH: eval vs cranelift\nExpr: {}\nVars: {:?}\nEval: {}\nJIT: {}",
-                    input.expr, var_map, eval_scalar, jit_val
-                );
+                if let Ok(compiled) = jit.compile_scalar(expr.ast(), &var_specs) {
+                    let jit_val = compiled.call(&args);
+
+                    if !approx_eq(eval_scalar, jit_val) {
+                        panic!(
+                            "PARITY MISMATCH: eval vs cranelift\nExpr: {}\nVars: {:?}\nEval: {}\nJIT: {}",
+                            input.expr, var_map, eval_scalar, jit_val
+                        );
+                    }
+                }
+            }
+        }
+        CType::Complex => {
+            let Value::Complex(eval_complex) = eval_val else { unreachable!() };
+
+            // 2. Lua evaluation
+            if let Ok(lua_val) = eval_lua(expr.ast(), &var_map) {
+                let Value::Complex(lua_complex) = lua_val else {
+                    panic!(
+                        "LUA TYPE MISMATCH: expected Complex, got {:?}\nExpr: {}",
+                        lua_val, input.expr
+                    );
+                };
+
+                if !complex_approx_eq(&eval_complex, &lua_complex) {
+                    panic!(
+                        "PARITY MISMATCH: eval vs lua\nExpr: {}\nVars: {:?}\nEval: {:?}\nLua: {:?}",
+                        input.expr, var_map, eval_complex, lua_complex
+                    );
+                }
+            }
+
+            // 3. Cranelift JIT (complex)
+            if let Ok(jit) = ComplexJit::new() {
+                let var_specs: Vec<VarSpec> = free_vars
+                    .iter()
+                    .map(|v| VarSpec::new(*v, var_map[*v].typ()))
+                    .collect();
+
+                if let Ok(compiled) = jit.compile_complex(expr.ast(), &var_specs) {
+                    let jit_val = compiled.call(&args);
+
+                    if !complex_approx_eq(&eval_complex, &jit_val) {
+                        panic!(
+                            "PARITY MISMATCH: eval vs cranelift\nExpr: {}\nVars: {:?}\nEval: {:?}\nJIT: {:?}",
+                            input.expr, var_map, eval_complex, jit_val
+                        );
+                    }
+                }
             }
         }
     }
